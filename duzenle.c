@@ -251,5 +251,98 @@ static const struct ov9282_reg mode_1280x720_regs[] = {
 	{0x5a08, 0x84},
 };
 
+
+
+static int ov9282_probe(struct i2c_client *client)
+{
+	struct ov9282 *ov9282;
+	int ret;
+
+	ov9282 = devm_kzalloc(&client->dev, sizeof(*ov9282), GFP_KERNEL);
+	if (!ov9282)
+		return -ENOMEM;
+
+	ov9282->dev = &client->dev;
+
+	/* Initialize subdev */
+	v4l2_i2c_subdev_init(&ov9282->sd, client, &ov9282_subdev_ops);
+
+	ret = ov9282_parse_hw_config(ov9282);
+	if (ret) {
+		dev_err(ov9282->dev, "HW configuration is not supported");
+		return ret;
+	}
+
+	mutex_init(&ov9282->mutex);
+
+	ret = ov9282_power_on(ov9282->dev);
+	if (ret) {
+		dev_err(ov9282->dev, "failed to power-on the sensor");
+		goto error_mutex_destroy;
+	}
+
+	/* Check module identity */
+	ret = ov9282_detect(ov9282);
+	if (ret) {
+		dev_err(ov9282->dev, "failed to find sensor: %d", ret);
+		goto error_power_off;
+	}
+
+	/* Set default mode to max resolution */
+	ov9282->cur_mode = &supported_mode;
+	ov9282->vblank = ov9282->cur_mode->vblank;
+
+	ret = ov9282_init_controls(ov9282);
+	if (ret) {
+		dev_err(ov9282->dev, "failed to init controls: %d", ret);
+		goto error_power_off;
+	}
+
+	/* Initialize subdev */
+	ov9282->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	ov9282->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+
+	/* Initialize source pad */
+	ov9282->pad.flags = MEDIA_PAD_FL_SOURCE;
+	ret = media_entity_pads_init(&ov9282->sd.entity, 1, &ov9282->pad);
+	if (ret) {
+		dev_err(ov9282->dev, "failed to init entity pads: %d", ret);
+		goto error_handler_free;
+	}
+
+	ret = v4l2_async_register_subdev_sensor(&ov9282->sd);
+	if (ret < 0) {
+		dev_err(ov9282->dev,
+			"failed to register async subdev: %d", ret);
+		goto error_media_entity;
+	}
+
+	pm_runtime_set_active(ov9282->dev);
+	pm_runtime_enable(ov9282->dev);
+	pm_runtime_idle(ov9282->dev);
+
+	return 0;
+
+error_media_entity:
+	media_entity_cleanup(&ov9282->sd.entity);
+error_handler_free:
+	v4l2_ctrl_handler_free(ov9282->sd.ctrl_handler);
+error_power_off:
+	ov9282_power_off(ov9282->dev);
+error_mutex_destroy:
+	mutex_destroy(&ov9282->mutex);
+
+	return ret;
+}
+
+
+static struct i2c_driver ov9282_driver = {
+	.probe_new = ov9282_probe,
+	
+};
+
+module_i2c_driver(ov9282_driver);
+
+
 MODULE_DESCRIPTION("OmniVision ov9282 sensor driver");
 MODULE_LICENSE("GPL");
