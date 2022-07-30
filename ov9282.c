@@ -503,6 +503,7 @@ static const struct v4l2_ctrl_ops ov9282_ctrl_ops = {
  *
  * Return: 0 if successful, error code otherwise.
  */
+struct v4l2_subdev_state* dummy;
 static int ov9282_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)
