@@ -250,7 +250,113 @@ static const struct ov9282_reg mode_1280x720_regs[] = {
 	{0x1000, 0x03},
 	{0x5a08, 0x84},
 };
+static int ov9282_write_reg(struct ov9282 *ov9282, u16 reg, u32 len, u32 val)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(&ov9282->sd);
+	u8 buf[6] = {0};
 
+	if (WARN_ON(len > 4))
+		return -EINVAL;
+
+	put_unaligned_be16(reg, buf);
+	put_unaligned_be32(val << (8 * (4 - len)), buf + 2);
+	if (i2c_master_send(client, buf, len + 2) != len + 2)
+		return -EIO;
+
+	return 0;
+}
+
+
+/**
+ * ov9282_write_regs() - Write a list of registers
+ * @ov9282: pointer to ov9282 device
+ * @regs: list of registers to be written
+ * @len: length of registers array
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int ov9282_write_regs(struct ov9282 *ov9282,
+			     const struct ov9282_reg *regs, u32 len)
+{
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < len; i++) {
+		ret = ov9282_write_reg(ov9282, regs[i].address, 1, regs[i].val);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+
+/**
+ * ov9282_stop_streaming() - Stop sensor stream
+ * @ov9282: pointer to ov9282 device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int ov9282_stop_streaming(struct ov9282 *ov9282)
+{
+	return ov9282_write_reg(ov9282, OV9282_REG_MODE_SELECT,
+				1, OV9282_MODE_STANDBY);
+}
+
+/**
+ * ov9282_set_stream() - Enable sensor streaming
+ * @sd: pointer to ov9282 subdevice
+ * @enable: set to enable sensor streaming
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int ov9282_set_stream(struct v4l2_subdev *sd, int enable)
+{
+	struct ov9282 *ov9282 = to_ov9282(sd);
+	int ret;
+
+	mutex_lock(&ov9282->mutex);
+
+	if (ov9282->streaming == enable) {
+		mutex_unlock(&ov9282->mutex);
+		return 0;
+	}
+
+	if (enable) {
+		ret = pm_runtime_resume_and_get(ov9282->dev);
+		if (ret)
+			goto error_unlock;
+
+		ret = ov9282_start_streaming(ov9282);
+		if (ret)
+			goto error_power_off;
+	} else {
+		ov9282_stop_streaming(ov9282);
+		pm_runtime_put(ov9282->dev);
+	}
+
+	ov9282->streaming = enable;
+
+	mutex_unlock(&ov9282->mutex);
+
+	return 0;
+
+error_power_off:
+	pm_runtime_put(ov9282->dev);
+error_unlock:
+	mutex_unlock(&ov9282->mutex);
+
+	return ret;
+}
+static const struct v4l2_subdev_video_ops ov9282_video_ops = {
+	.s_stream = ov9282_set_stream,
+};
+
+
+static const struct v4l2_subdev_ops ov9282_subdev_ops = {
+	.video = &ov9282_video_ops,
+	.pad = &ov9282_pad_ops,
+};
 
 
 static int ov9282_probe(struct i2c_client *client)
@@ -267,72 +373,7 @@ static int ov9282_probe(struct i2c_client *client)
 	/* Initialize subdev */
 	v4l2_i2c_subdev_init(&ov9282->sd, client, &ov9282_subdev_ops);
 
-	ret = ov9282_parse_hw_config(ov9282);
-	if (ret) {
-		dev_err(ov9282->dev, "HW configuration is not supported");
-		return ret;
-	}
-
-	mutex_init(&ov9282->mutex);
-
-	ret = ov9282_power_on(ov9282->dev);
-	if (ret) {
-		dev_err(ov9282->dev, "failed to power-on the sensor");
-		goto error_mutex_destroy;
-	}
-
-	/* Check module identity */
-	ret = ov9282_detect(ov9282);
-	if (ret) {
-		dev_err(ov9282->dev, "failed to find sensor: %d", ret);
-		goto error_power_off;
-	}
-
-	/* Set default mode to max resolution */
-	ov9282->cur_mode = &supported_mode;
-	ov9282->vblank = ov9282->cur_mode->vblank;
-
-	ret = ov9282_init_controls(ov9282);
-	if (ret) {
-		dev_err(ov9282->dev, "failed to init controls: %d", ret);
-		goto error_power_off;
-	}
-
-	/* Initialize subdev */
-	ov9282->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	ov9282->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-
-	/* Initialize source pad */
-	ov9282->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_pads_init(&ov9282->sd.entity, 1, &ov9282->pad);
-	if (ret) {
-		dev_err(ov9282->dev, "failed to init entity pads: %d", ret);
-		goto error_handler_free;
-	}
-
-	ret = v4l2_async_register_subdev_sensor(&ov9282->sd);
-	if (ret < 0) {
-		dev_err(ov9282->dev,
-			"failed to register async subdev: %d", ret);
-		goto error_media_entity;
-	}
-
-	pm_runtime_set_active(ov9282->dev);
-	pm_runtime_enable(ov9282->dev);
-	pm_runtime_idle(ov9282->dev);
-
 	return 0;
-
-error_media_entity:
-	media_entity_cleanup(&ov9282->sd.entity);
-error_handler_free:
-	v4l2_ctrl_handler_free(ov9282->sd.ctrl_handler);
-error_power_off:
-	ov9282_power_off(ov9282->dev);
-error_mutex_destroy:
-	mutex_destroy(&ov9282->mutex);
-
-	return ret;
 }
 
 
