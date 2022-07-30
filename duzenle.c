@@ -252,6 +252,75 @@ static const struct ov9282_reg mode_1280x720_regs[] = {
 };
 
 
+/* V4l2 subdevice ops */
+static const struct v4l2_subdev_video_ops ov9282_video_ops = {
+	.s_stream = ov9282_set_stream,
+};
+
+static const struct v4l2_subdev_pad_ops ov9282_pad_ops = {
+	.init_cfg = ov9282_init_pad_cfg,
+	.enum_mbus_code = ov9282_enum_mbus_code,
+	.enum_frame_size = ov9282_enum_frame_size,
+	.get_fmt = ov9282_get_pad_format,
+	.set_fmt = ov9282_set_pad_format,
+};
+
+static const struct v4l2_subdev_ops ov9282_subdev_ops = {
+	.video = &ov9282_video_ops,
+	.pad = &ov9282_pad_ops,
+};
+
+/**
+ * ov9282_power_on() - Sensor power on sequence
+ * @dev: pointer to i2c device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int ov9282_power_on(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct ov9282 *ov9282 = to_ov9282(sd);
+	int ret;
+
+	usleep_range(400, 600);
+
+	gpiod_set_value_cansleep(ov9282->reset_gpio, 1);
+
+	ret = clk_prepare_enable(ov9282->inclk);
+	if (ret) {
+		dev_err(ov9282->dev, "fail to enable inclk");
+		goto error_reset;
+	}
+
+	usleep_range(400, 600);
+
+	return 0;
+
+error_reset:
+	gpiod_set_value_cansleep(ov9282->reset_gpio, 0);
+
+	return ret;
+}
+
+/**
+ * ov9282_power_off() - Sensor power off sequence
+ * @dev: pointer to i2c device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int ov9282_power_off(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct ov9282 *ov9282 = to_ov9282(sd);
+
+	gpiod_set_value_cansleep(ov9282->reset_gpio, 0);
+
+	clk_disable_unprepare(ov9282->inclk);
+
+	return 0;
+}
+
+
 static int ov9282_probe(struct i2c_client *client)
 {
 	struct ov9282 *ov9282;
