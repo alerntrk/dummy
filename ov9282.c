@@ -259,7 +259,10 @@ static int ov9282_probe(struct i2c_client *client)
 
 
 }
-
+static struct i2c_driver ov9282_driver = {
+	.probe_new = ov9282_probe,
+	
+};
 
 
 module_i2c_driver(ov9282_driver);
