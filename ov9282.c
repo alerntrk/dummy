@@ -244,22 +244,35 @@ static const struct ov9282_reg mode_1280x720_regs[] = {
 	{0x5000, 0x9f},
 	{0x5001, 0x00},
 	{0x5e00, 0x00},
-	{0x5d00, 0x07},
+	{0x5d00, 0x07o},
 	{0x5d01, 0x00},
 	{0x0101, 0x01},
 	{0x1000, 0x03},
 	{0x5a08, 0x84},
 };
 
-
-static int ov9282_probe(struct i2c_client *client)
-{
-    printk("Hello, Kernel!\n");
+static int ov9282_probe(struct i2c_client *client){
+	
+	
+	printk("hello world");	
 	return 0;
+	
 }
 
+static int ov9282_remove(struct i2c_client *client){
+	
+	
+	printk("hello world");	
+	return 0;
+	
+}
 
-module_init(ov9282_probe);
+static struct i2c_driver ov9282_driver = {
+	.probe_new = ov9282_probe,
+	.remove = ov9282_remove,
+};
+
+module_i2c_driver(ov9282_driver);
 
 MODULE_DESCRIPTION("OmniVision ov9282 sensor driver");
 MODULE_LICENSE("GPL");
