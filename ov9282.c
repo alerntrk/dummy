@@ -251,25 +251,10 @@ static const struct ov9282_reg mode_1280x720_regs[] = {
 	{0x5a08, 0x84},
 };
 
-static int ov9282_probe(struct i2c_client *client){
-	
-	
-	printk("hello world");	
-	return 0;
-	
-}
 
-static int ov9282_remove(struct i2c_client *client){
-	
-	
-	printk("hello world");	
-	return 0;
-	
-}
 
 static struct i2c_driver ov9282_driver = {
-	.probe_new = ov9282_probe,
-	.remove = ov9282_remove,
+	
 };
 
 module_i2c_driver(ov9282_driver);
