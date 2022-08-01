@@ -244,14 +244,19 @@ static const struct ov9282_reg mode_1280x720_regs[] = {
 	{0x5000, 0x9f},
 	{0x5001, 0x00},
 	{0x5e00, 0x00},
-	{0x5d00, 0x07o},
+	{0x5d00, 0x07},
 	{0x5d01, 0x00},
 	{0x0101, 0x01},
 	{0x1000, 0x03},
 	{0x5a08, 0x84},
 };
 
+static const struct of_device_id ov9282_of_match[] = {
+	{ .compatible = "ovti,ov9282" },
+	{ }
+};
 
+MODULE_DEVICE_TABLE(of, ov9282_of_match);
 
 static struct i2c_driver ov9282_driver = {
 	
