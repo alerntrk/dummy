@@ -261,13 +261,13 @@ static int ov9282_probe(struct i2c_client *client)
 }
 static struct i2c_driver ov9282_driver = {
 	.probe_new = ov9282_probe,
-
+	.
 };
 
 
 
 
-module_i2c_driver(ov9282_driver);
+module_init(ov9282_driver);
 
 MODULE_DESCRIPTION("OmniVision ov9282 sensor driver");
 MODULE_LICENSE("GPL");
