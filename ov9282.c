@@ -262,7 +262,21 @@ static struct i2c_driver ov9282_driver = {
 	
 };
 
-module_i2c_driver(ov9282_driver);
+
+static int __init ov9282_driver_init(void) 
+{ 
+     i2c_add_driver(&bmp180_driver);
+     return 0; 
+} 
+  
+static void __exit ov9282_driver_exit(void) 
+{ 
+     i2c_del_driver(&bmp180_driver);
+} 
+module_init(ov9282_driver_init); 
+module_exit(ov9282_driver_exit); 
+
+
 
 MODULE_DESCRIPTION("OmniVision ov9282 sensor driver");
 MODULE_LICENSE("GPL");
