@@ -1,282 +1,218 @@
-
-// SPDX-License-Identifier: GPL-2.0-only
-/*
- * OmniVision ov9282 Camera Sensor Driver
- *
- * Copyright (C) 2021 Intel Corporation
- */
-#include <asm/unaligned.h>
-
-#include <linux/clk.h>
-#include <linux/delay.h>
-#include <linux/i2c.h>
 #include <linux/module.h>
-#include <linux/pm_runtime.h>
+#include <linux/init.h>
+#include <linux/fs.h>
+#include <linux/version.h>
+#include <linux/cdev.h>
+#include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <linux/i2c.h>
+#include <linux/kernel.h>
 
-#include <media/v4l2-ctrls.h>
-#include <media/v4l2-fwnode.h>
-#include <media/v4l2-subdev.h>
+#define DRIVER_NAME "bmp280"
+#define DRIVER_CLASS "bmp280Class"
 
-/* Streaming Mode */
-#define OV9282_REG_MODE_SELECT	0x0100
-#define OV9282_MODE_STANDBY	0x00
-#define OV9282_MODE_STREAMING	0x01
+static struct i2c_adapter * bmp_i2c_adapter = NULL;
+static struct i2c_client * bmp280_i2c_client = NULL;
 
-/* Lines per frame */
-#define OV9282_REG_LPFR		0x380e
-
-/* Chip ID */
-#define OV9282_REG_ID		0x300a
-#define OV9282_ID		0x9281
-
-/* Exposure control */
-#define OV9282_REG_EXPOSURE	0x3500
-#define OV9282_EXPOSURE_MIN	1
-#define OV9282_EXPOSURE_OFFSET	12
-#define OV9282_EXPOSURE_STEP	1
-#define OV9282_EXPOSURE_DEFAULT	0x0282
-
-/* Analog gain control */
-#define OV9282_REG_AGAIN	0x3509
-#define OV9282_AGAIN_MIN	0x10
-#define OV9282_AGAIN_MAX	0xff
-#define OV9282_AGAIN_STEP	1
-#define OV9282_AGAIN_DEFAULT	0x10
-
-/* Group hold register */
-#define OV9282_REG_HOLD		0x3308
-
-/* Input clock rate */
-#define OV9282_INCLK_RATE	24000000
-
-/* CSI2 HW configuration */
-#define OV9282_LINK_FREQ	400000000
-#define OV9282_NUM_DATA_LANES	2
-
-#define OV9282_REG_MIN		0x00
-#define OV9282_REG_MAX		0xfffff
-
-/**
- * struct ov9282_reg - ov9282 sensor register
- * @address: Register address
- * @val: Register value
- */
-struct ov9282_reg {
-	u16 address;
-	u8 val;
-};
-
-/**
- * struct ov9282_reg_list - ov9282 sensor register list
- * @num_of_regs: Number of registers in the list
- * @regs: Pointer to register list
- */
-struct ov9282_reg_list {
-	u32 num_of_regs;
-	const struct ov9282_reg *regs;
-};
-
-/**
- * struct ov9282_mode - ov9282 sensor mode structure
- * @width: Frame width
- * @height: Frame height
- * @code: Format code
- * @hblank: Horizontal blanking in lines
- * @vblank: Vertical blanking in lines
- * @vblank_min: Minimum vertical blanking in lines
- * @vblank_max: Maximum vertical blanking in lines
- * @pclk: Sensor pixel clock
- * @link_freq_idx: Link frequency index
- * @reg_list: Register list for sensor mode
- */
-struct ov9282_mode {
-	u32 width;
-	u32 height;
-	u32 code;
-	u32 hblank;
-	u32 vblank;
-	u32 vblank_min;
-	u32 vblank_max;
-	u64 pclk;
-	u32 link_freq_idx;
-	struct ov9282_reg_list reg_list;
-};
-
-/**
- * struct ov9282 - ov9282 sensor device structure
- * @dev: Pointer to generic device
- * @client: Pointer to i2c client
- * @sd: V4L2 sub-device
- * @pad: Media pad. Only one pad supported
- * @reset_gpio: Sensor reset gpio
- * @inclk: Sensor input clock
- * @ctrl_handler: V4L2 control handler
- * @link_freq_ctrl: Pointer to link frequency control
- * @pclk_ctrl: Pointer to pixel clock control
- * @hblank_ctrl: Pointer to horizontal blanking control
- * @vblank_ctrl: Pointer to vertical blanking control
- * @exp_ctrl: Pointer to exposure control
- * @again_ctrl: Pointer to analog gain control
- * @vblank: Vertical blanking in lines
- * @cur_mode: Pointer to current selected sensor mode
- * @mutex: Mutex for serializing sensor controls
- * @streaming: Flag indicating streaming state
- */
-struct ov9282 {
-	struct device *dev;
-	struct i2c_client *client;
-	struct v4l2_subdev sd;
-	struct media_pad pad;
-	struct gpio_desc *reset_gpio;
-	struct clk *inclk;
-	struct v4l2_ctrl_handler ctrl_handler;
-	struct v4l2_ctrl *link_freq_ctrl;
-	struct v4l2_ctrl *pclk_ctrl;
-	struct v4l2_ctrl *hblank_ctrl;
-	struct v4l2_ctrl *vblank_ctrl;
-	struct {
-		struct v4l2_ctrl *exp_ctrl;
-		struct v4l2_ctrl *again_ctrl;
-	};
-	u32 vblank;
-	const struct ov9282_mode *cur_mode;
-	struct mutex mutex;
-	bool streaming;
-};
-
-static const s64 link_freq[] = {
-	OV9282_LINK_FREQ,
-};
-
-/* Sensor mode registers */
-static const struct ov9282_reg mode_1280x720_regs[] = {
-	{0x0302, 0x32},
-	{0x030d, 0x50},
-	{0x030e, 0x02},
-	{0x3001, 0x00},
-	{0x3004, 0x00},
-	{0x3005, 0x00},
-	{0x3006, 0x04},
-	{0x3011, 0x0a},
-	{0x3013, 0x18},
-	{0x301c, 0xf0},
-	{0x3022, 0x01},
-	{0x3030, 0x10},
-	{0x3039, 0x32},
-	{0x303a, 0x00},
-	{0x3500, 0x00},
-	{0x3501, 0x5f},
-	{0x3502, 0x1e},
-	{0x3503, 0x08},
-	{0x3505, 0x8c},
-	{0x3507, 0x03},
-	{0x3508, 0x00},
-	{0x3509, 0x10},
-	{0x3610, 0x80},
-	{0x3611, 0xa0},
-	{0x3620, 0x6e},
-	{0x3632, 0x56},
-	{0x3633, 0x78},
-	{0x3666, 0x00},
-	{0x366f, 0x5a},
-	{0x3680, 0x84},
-	{0x3712, 0x80},
-	{0x372d, 0x22},
-	{0x3731, 0x80},
-	{0x3732, 0x30},
-	{0x3778, 0x00},
-	{0x377d, 0x22},
-	{0x3788, 0x02},
-	{0x3789, 0xa4},
-	{0x378a, 0x00},
-	{0x378b, 0x4a},
-	{0x3799, 0x20},
-	{0x3800, 0x00},
-	{0x3801, 0x00},
-	{0x3802, 0x00},
-	{0x3803, 0x00},
-	{0x3804, 0x05},
-	{0x3805, 0x0f},
-	{0x3806, 0x02},
-	{0x3807, 0xdf},
-	{0x3808, 0x05},
-	{0x3809, 0x00},
-	{0x380a, 0x02},
-	{0x380b, 0xd0},
-	{0x380c, 0x05},
-	{0x380d, 0xfa},
-	{0x380e, 0x06},
-	{0x380f, 0xce},
-	{0x3810, 0x00},
-	{0x3811, 0x08},
-	{0x3812, 0x00},
-	{0x3813, 0x08},
-	{0x3814, 0x11},
-	{0x3815, 0x11},
-	{0x3820, 0x3c},
-	{0x3821, 0x84},
-	{0x3881, 0x42},
-	{0x38a8, 0x02},
-	{0x38a9, 0x80},
-	{0x38b1, 0x00},
-	{0x38c4, 0x00},
-	{0x38c5, 0xc0},
-	{0x38c6, 0x04},
-	{0x38c7, 0x80},
-	{0x3920, 0xff},
-	{0x4003, 0x40},
-	{0x4008, 0x02},
-	{0x4009, 0x05},
-	{0x400c, 0x00},
-	{0x400d, 0x03},
-	{0x4010, 0x40},
-	{0x4043, 0x40},
-	{0x4307, 0x30},
-	{0x4317, 0x00},
-	{0x4501, 0x00},
-	{0x4507, 0x00},
-	{0x4509, 0x80},
-	{0x450a, 0x08},
-	{0x4601, 0x04},
-	{0x470f, 0x00},
-	{0x4f07, 0x00},
-	{0x4800, 0x20},
-	{0x5000, 0x9f},
-	{0x5001, 0x00},
-	{0x5e00, 0x00},
-	{0x5d00, 0x07},
-	{0x5d01, 0x00},
-	{0x0101, 0x01},
-	{0x1000, 0x03},
-	{0x5a08, 0x84},
-};
-
-static const struct of_device_id ov9282_of_match[] = {
-	{ .compatible = "ovti,ov9282" },
-	{ }
-};
-
-MODULE_DEVICE_TABLE(of, ov9282_of_match);
-
-static struct i2c_driver ov9282_driver = {
-	
-};
-
-
-static int __init ov9282_driver_init(void) 
-{ 
-     i2c_add_driver(&ov9282_driver);
-     return 0; 
-} 
-  
-static void __exit ov9282_driver_exit(void) 
-{ 
-     i2c_del_driver(&ov9282_driver);
-} 
-module_init(ov9282_driver_init); 
-module_exit(ov9282_driver_exit); 
-
-
-
-MODULE_DESCRIPTION("OmniVision ov9282 sensor driver");
+/* Meta Information */
+MODULE_AUTHOR("Johannes 4Linux");
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("A driver for reading out a BMP280 temperature sensor");
+MODULE_SUPPORTED_DEVICE("NONE");
+
+/* Defines for device identification */ 
+#define I2C_BUS_AVAILABLE	1		/* The I2C Bus available on the raspberry */
+#define SLAVE_DEVICE_NAME	"BMP280"	/* Device and Driver Name */
+#define BMP280_SLAVE_ADDRESS	0x76		/* BMP280 I2C address */
+
+static const struct i2c_device_id bmp_id[] = {
+		{ SLAVE_DEVICE_NAME, 0 }, 
+		{ }
+};
+
+static struct i2c_driver bmp_driver = {
+	.driver = {
+		.name = SLAVE_DEVICE_NAME,
+		.owner = THIS_MODULE
+	}
+};
+
+static struct i2c_board_info bmp_i2c_board_info = {
+	I2C_BOARD_INFO(SLAVE_DEVICE_NAME, BMP280_SLAVE_ADDRESS)
+};
+
+/* Variables for Device and Deviceclass*/
+static dev_t myDeviceNr;
+static struct class *myClass;
+static struct cdev myDevice;
+
+/* Variables for temperature calculation */
+s32 dig_T1, dig_T2, dig_T3;
+
+/**
+ * @brief Read current temperature from BMP280 sensor
+ *
+ * @return temperature in degree
+ */
+s32 read_temperature(void) {
+	int var1, var2;
+	s32 raw_temp;
+	s32 d1, d2, d3;
+
+	/* Read Temperature */
+	d1 = i2c_smbus_read_byte_data(bmp280_i2c_client, 0xFA);
+	d2 = i2c_smbus_read_byte_data(bmp280_i2c_client, 0xFB);
+	d3 = i2c_smbus_read_byte_data(bmp280_i2c_client, 0xFC);
+	raw_temp = ((d1<<16) | (d2<<8) | d3) >> 4;
+
+	/* Calculate temperature in degree */
+	var1 = ((((raw_temp >> 3) - (dig_T1 << 1))) * (dig_T2)) >> 11;
+
+	var2 = (((((raw_temp >> 4) - (dig_T1)) * ((raw_temp >> 4) - (dig_T1))) >> 12) * (dig_T3)) >> 14;
+	return ((var1 + var2) *5 +128) >> 8;
+}
+
+/**
+ * @brief Get data out of buffer
+ */
+static ssize_t driver_read(struct file *File, char *user_buffer, size_t count, loff_t *offs) {
+	int to_copy, not_copied, delta;
+	char out_string[20];
+	int temperature;
+
+	/* Get amount of bytes to copy */
+	to_copy = min(sizeof(out_string), count);
+
+	/* Get temperature */
+	temperature = read_temperature();
+	snprintf(out_string, sizeof(out_string), "%d.%d\n", temperature/100, temperature%100);
+
+	/* Copy Data to user */
+	not_copied = copy_to_user(user_buffer, out_string, to_copy);
+
+	/* Calculate delta */
+	delta = to_copy - not_copied;
+
+	return delta;
+}
+
+/**
+ * @brief This function is called, when the device file is opened
+ */
+static int driver_open(struct inode *deviceFile, struct file *instance) {
+	printk("MyDeviceDriver -  Open was called\n");
+	return 0;
+}
+
+/**
+ * @brief This function is called, when the device file is close
+ */
+static int driver_close(struct inode *deviceFile, struct file *instance) {
+	printk("MyDeviceDriver -  Close was called\n");
+	return 0;
+}
+
+/* Map the file operations */
+static struct file_operations fops = {
+	.owner = THIS_MODULE,
+	.open = driver_open,
+	.release = driver_close,
+	.read = driver_read,
+};
+
+
+/**
+ * @brief function, which is called after loading module to kernel, do initialization there
+ */
+static int __init ModuleInit(void) {
+	int ret = -1;
+	u8 id;
+	printk("MyDeviceDriver - Hello Kernel\n");
+
+	/* Allocate Device Nr */
+	if ( alloc_chrdev_region(&myDeviceNr, 0, 1, DRIVER_NAME) < 0) {
+		printk("Device Nr. could not be allocated!\n");
+	}
+	printk("MyDeviceDriver - Device Nr %d was registered\n", myDeviceNr);
+
+	/* Create Device Class */
+	if ((myClass = class_create(THIS_MODULE, DRIVER_CLASS)) == NULL) {
+		printk("Device Class can not be created!\n");
+		goto ClassError;
+	}
+
+	/* Create Device file */
+	if (device_create(myClass, NULL, myDeviceNr, NULL, DRIVER_NAME) == NULL) {
+		printk("Can not create device file!\n");
+		goto FileError;
+	}
+
+	/* Initialize Device file */
+	cdev_init(&myDevice, &fops);
+
+	/* register device to kernel */
+	if (cdev_add(&myDevice, myDeviceNr, 1) == -1) {
+		printk("Registering of device to kernel failed!\n");
+		goto KernelError;
+	}
+
+	bmp_i2c_adapter = i2c_get_adapter(I2C_BUS_AVAILABLE);
+
+	if(bmp_i2c_adapter != NULL) {
+		bmp280_i2c_client = i2c_new_device(bmp_i2c_adapter, &bmp_i2c_board_info);
+		if(bmp280_i2c_client != NULL) {
+			if(i2c_add_driver(&bmp_driver) != -1) {
+				ret = 0;
+			}
+			else
+				printk("Can't add driver...\n");
+		}
+		i2c_put_adapter(bmp_i2c_adapter);
+	}
+	printk("BMP280 Driver added!\n");
+
+	/* Read Chip ID */
+	id = i2c_smbus_read_byte_data(bmp280_i2c_client, 0xD0);
+	printk("ID: 0x%x\n", id);
+
+	/* Read Calibration Values */
+	dig_T1 = i2c_smbus_read_word_data(bmp280_i2c_client, 0x88);
+	dig_T2 = i2c_smbus_read_word_data(bmp280_i2c_client, 0x8a);
+	dig_T3 = i2c_smbus_read_word_data(bmp280_i2c_client, 0x8c);
+
+	if(dig_T2 > 32767)
+		dig_T2 -= 65536;
+
+	if(dig_T3 > 32767)
+		dig_T3 -= 65536;
+
+	/* Initialice the sensor */
+	i2c_smbus_write_byte_data(bmp280_i2c_client, 0xf5, 5<<5);
+	i2c_smbus_write_byte_data(bmp280_i2c_client, 0xf4, ((5<<5) | (5<<2) | (3<<0)));
+	return ret;
+
+KernelError:
+	device_destroy(myClass, myDeviceNr);
+FileError:
+	class_destroy(myClass);
+ClassError:
+	unregister_chrdev(myDeviceNr, DRIVER_NAME);
+	return (-1);
+}
+
+/**
+ * @brief function, which is called when removing module from kernel
+ * free alocated resources
+ */
+static void __exit ModuleExit(void) {
+	printk("MyDeviceDriver - Goodbye, Kernel!\n");
+	i2c_unregister_device(bmp280_i2c_client);
+	i2c_del_driver(&bmp_driver);
+	cdev_del(&myDevice);
+    device_destroy(myClass, myDeviceNr);
+    class_destroy(myClass);
+    unregister_chrdev_region(myDeviceNr, 1);
+}
+
+module_init(ModuleInit);
+module_exit(ModuleExit);
