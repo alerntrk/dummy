@@ -35,7 +35,7 @@ int LED_Ctrol(char *buff)
     return 0;
 }
 
-static int __init led_init(void)
+static int  led_init(void)
 {
     char buff_on[] = {"128"};
     LED_Ctrol(buff_on);
@@ -43,13 +43,36 @@ static int __init led_init(void)
     return 0;
 }
 
-static void __exit led_exit(void)
-{
-    char buff_off[] = {"0"};
-    LED_Ctrol(buff_off);
-    printk(KERN_ALERT "LED OFF\n");
+
+
+
+static const struct of_device_id ov9282_of_match[] = {
+	{ .compatible = "ovti,ov9282" },
+	{ }
+};
+
+
+
+static int ov9282_probe(struct i2c_client *client){
+	
+	led_init();
+	
+	
+	return 0;
 }
 
-module_init(led_init);
-module_exit(led_exit);
-MODULE_LICENSE("GPL v2");
+MODULE_DEVICE_TABLE(of, ov9282_of_match);
+
+static struct i2c_driver ov9282_driver = {
+	.probe_new = ov9282_probe,
+	.driver = {
+		.name = "ov9282",
+		.pm = &ov9282_pm_ops,
+		.of_match_table = ov9282_of_match,
+	},
+};
+
+module_i2c_driver(ov9282_driver);
+
+MODULE_DESCRIPTION("OmniVision ov9282 sensor driver");
+MODULE_LICENSE("GPL");
