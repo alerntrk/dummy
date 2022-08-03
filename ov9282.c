@@ -23,7 +23,7 @@ MODULE_SUPPORTED_DEVICE("NONE");
 /* Defines for device identification */ 
 #define I2C_BUS_AVAILABLE	1		/* The I2C Bus available on the raspberry */
 #define SLAVE_DEVICE_NAME	"BMP280"	/* Device and Driver Name */
-#define BMP280_SLAVE_ADDRESS	0x500		/* BMP280 I2C address */
+#define BMP280_SLAVE_ADDRESS	0x28		/* BMP280 I2C address */
 
 static const struct i2c_device_id bmp_id[] = {
 		{ SLAVE_DEVICE_NAME, 0 }, 
