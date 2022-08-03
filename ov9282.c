@@ -30,7 +30,46 @@ static const struct i2c_device_id bmp_id[] = {
 		{ }
 };
 
+
+
+int LED_Ctrol(char *buff)
+{
+    struct file *fd = NULL;
+    mm_segment_t fs;
+    loff_t pos;
+
+    fd = filp_open(LED_FILE, O_RDWR, 0);
+    if (IS_ERR(fd)) {
+	printk(KERN_ERR "open failed!\n");
+	filp_close(fd, NULL);
+        return -1;
+    }
+
+    fs = get_fs();
+    set_fs(KERNEL_DS);
+    pos = 0;
+    vfs_write(fd, buff, sizeof(buff), &pos);
+    pos = 0;
+
+    filp_close(fd, NULL);
+    set_fs(fs);
+
+    return 0;
+}
+static int bmp_probe(struct i2c_client *client){
+    char buff_on[] = {"128"};
+    LED_Ctrol(buff_on);
+    printk(KERN_ALERT "LED ON\n");
+	
+	
+	
+	
+}
 static struct i2c_driver bmp_driver = {
+	
+	
+	
+	.probe_new = bmp_probe,  
 	.driver = {
 		.name = SLAVE_DEVICE_NAME,
 		.owner = THIS_MODULE
