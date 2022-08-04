@@ -276,7 +276,7 @@ static const struct ov9282_mode supported_mode = {
 static int ov9282_probe(struct i2c_client *client)
 {
 	printk("hello kernel");
-
+	return 0;
 }
 
 /**
@@ -335,7 +335,7 @@ static int ov9282_power_on(struct device *dev)
 	return 0;
 
 error_reset:
-	gpiod_set_value_cansleep(ov9282->reset_gpio, 0);
+	//gpiod_set_value_cansleep(ov9282->reset_gpio, 0);
 
 	return ret;
 }
@@ -351,7 +351,7 @@ static int ov9282_power_off(struct device *dev)
 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
 	struct ov9282 *ov9282 = to_ov9282(sd);
 
-	gpiod_set_value_cansleep(ov9282->reset_gpio, 0);
+	///gpiod_set_value_cansleep(ov9282->reset_gpio, 0);
 
 	clk_disable_unprepare(ov9282->inclk);
 
