@@ -298,19 +298,72 @@ static const struct of_device_id ov9282_of_match[] = {
 	{ }
 };
 
-MODULE_DEVICE_TABLE(of, ov9282_of_match);
+/**
+ * ov9282_power_on() - Sensor power on sequence
+ * @dev: pointer to i2c device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int ov9282_power_on(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct ov9282 *ov9282 = to_ov9282(sd);
+	int ret;
+
+	usleep_range(400, 600);
+
+	gpiod_set_value_cansleep(ov9282->reset_gpio, 1);
+
+	ret = clk_prepare_enable(ov9282->inclk);
+	if (ret) {
+		dev_err(ov9282->dev, "fail to enable inclk");
+		goto error_reset;
+	}
+
+	usleep_range(400, 600);
+
+	return 0;
+
+error_reset:
+	gpiod_set_value_cansleep(ov9282->reset_gpio, 0);
+
+	return ret;
+}
+
+/**
+ * ov9282_power_off() - Sensor power off sequence
+ * @dev: pointer to i2c device
+ *
+ * Return: 0 if successful, error code otherwise.
+ */
+static int ov9282_power_off(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct ov9282 *ov9282 = to_ov9282(sd);
+
+	gpiod_set_value_cansleep(ov9282->reset_gpio, 0);
+
+	clk_disable_unprepare(ov9282->inclk);
+
+	return 0;
+}
+static const struct dev_pm_ops ov9282_pm_ops = {
+	SET_RUNTIME_PM_OPS(ov9282_power_off, ov9282_power_on, NULL)
+};
+
 
 static struct i2c_driver ov9282_driver = {
 	.probe_new = ov9282_probe,
 	.remove = ov9282_remove,
 	.driver = {
 		.name = "ov9282",
-		//.pm = &ov9282_pm_ops,
+		.pm = &ov9282_pm_ops,
 		.of_match_table = ov9282_of_match,
 	},
 };
 
 module_i2c_driver(ov9282_driver);
+MODULE_DEVICE_TABLE(of, ov9282_of_match);
 
 MODULE_DESCRIPTION("OmniVision ov9282 sensor driver");
 MODULE_LICENSE("GPL");
