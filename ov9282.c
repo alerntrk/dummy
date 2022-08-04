@@ -297,6 +297,16 @@ static const struct of_device_id ov9282_of_match[] = {
 	{ .compatible = "ovti,ov9282" },
 	{ }
 };
+/**
+ * to_ov9282() - ov9282 V4L2 sub-device to ov9282 device.
+ * @subdev: pointer to ov9282 V4L2 sub-device
+ *
+ * Return: pointer to ov9282 device
+ */
+static inline struct ov9282 *to_ov9282(struct v4l2_subdev *subdev)
+{
+	return container_of(subdev, struct ov9282, sd);
+}
 
 /**
  * ov9282_power_on() - Sensor power on sequence
