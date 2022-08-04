@@ -294,7 +294,7 @@ static int ov9282_remove(struct i2c_client *client)
 
 
 static const struct of_device_id ov9282_of_match[] = {
-	{ .compatible = "ovti,ov9282" },
+	{ .compatible = "qcom,msm-cdc-pinctrl" },
 	{ }
 };
 /**
@@ -366,14 +366,15 @@ static struct i2c_driver ov9282_driver = {
 	.probe_new = ov9282_probe,
 	.remove = ov9282_remove,
 	.driver = {
-		.name = "ov9282",
+		.name = "msm-cdc-pinctrl",
 		.pm = &ov9282_pm_ops,
 		.of_match_table = ov9282_of_match,
 	},
 };
+MODULE_DEVICE_TABLE(of, ov9282_of_match);
 
 module_i2c_driver(ov9282_driver);
-MODULE_DEVICE_TABLE(of, ov9282_of_match);
+//MODULE_DEVICE_TABLE(of, ov9282_of_match);
 
 MODULE_DESCRIPTION("OmniVision ov9282 sensor driver");
 MODULE_LICENSE("GPL");
