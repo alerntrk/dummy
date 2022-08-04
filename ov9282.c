@@ -322,7 +322,7 @@ static int ov9282_power_on(struct device *dev)
 
 	usleep_range(400, 600);
 
-	gpiod_set_value_cansleep(ov9282->reset_gpio, 1);
+	//gpiod_set_value_cansleep(ov9282->reset_gpio, 1);
 
 	ret = clk_prepare_enable(ov9282->inclk);
 	if (ret) {
