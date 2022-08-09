@@ -141,13 +141,14 @@ static int __init ModuleInit(void) {
 		printk("Device Class can not be created!\n");
 		goto ClassError;
 	}
+    printk("after class error!\n");
 
 	/* Create Device file */
 	if (device_create(myClass, NULL, myDeviceNr, NULL, DRIVER_NAME) == NULL) {
 		printk("Can not create device file!\n");
 		goto FileError;
 	}
-
+    printk("after file error!\n");
 	/* Initialize Device file */
 	cdev_init(&myDevice, &fops);
 
@@ -160,16 +161,21 @@ static int __init ModuleInit(void) {
 	bmp_i2c_adapter = i2c_get_adapter(I2C_BUS_AVAILABLE);
 
 	if(bmp_i2c_adapter != NULL) {
+        printk("ilk ifde !\n");
 		bmp280_i2c_client = i2c_new_device(bmp_i2c_adapter, &bmp_i2c_board_info);
 		if(bmp280_i2c_client != NULL) {
+            printk("ikinci ifde!\n");
 			if(i2c_add_driver(&bmp_driver) != -1) {
 				ret = 0;
+                printk("en icdeki ifde!\n");
 			}
 			else
 				printk("Can't add driver...\n");
-                return 0;
+                ret=5;
 		}
+        printk("i2c_put_adapter oncesi!\n");
 		i2c_put_adapter(bmp_i2c_adapter);
+        printk("ilk ifin sonunda !\n");
 	}
 	printk("BMP280 Driver added!\n");
 
